@@ -1,0 +1,316 @@
+# Akul Saju
+# slack @akul
+# GITHUB akulsaju
+
+import pygame
+import sys
+import random
+import json
+import socket
+import threading
+import math
+from pygame.locals import *
+
+# Initialize Pygame
+pygame.init()
+
+# Screen dimensions
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption("Advanced 2D Game Engine")
+
+# Clock object to manage the frame rate
+clock = pygame.time.Clock()
+
+# Define colors
+PLAYER_COLOR = (0, 128, 255)
+ENEMY_COLOR = (255, 0, 0)
+POWER_UP_COLOR = (0, 255, 0)
+PARTICLE_COLOR = (255, 255, 0)
+TEXT_COLOR = (255, 255, 255)
+BACKGROUND_COLOR = (0, 0, 0)
+WEATHER_COLOR = (100, 100, 100)  # Simple gray for weather effect
+
+# Define game attributes
+PLAYER_SIZE = 50
+player_x = SCREEN_WIDTH // 2
+player_y = SCREEN_HEIGHT // 2
+player_speed = 5
+player_health = 100
+player_score = 0
+
+ENEMY_SIZE = 50
+enemy_speed = 2
+patrol_points = [(100, 100), (700, 100)]
+enemies = []
+
+POWER_UP_SIZE = 30
+power_ups = []
+
+PARTICLE_SIZE = 5
+particles = []
+
+# Load sound effects
+pygame.mixer.music.load('background_music.mp3')
+pygame.mixer.music.play(-1)
+hit_sound = pygame.mixer.Sound('hit_sound.wav')
+power_up_sound = pygame.mixer.Sound('power_up_sound.wav')
+
+# Font for displaying score and health
+font = pygame.font.SysFont(None, 36)
+
+# Camera attributes
+camera_x, camera_y = 0, 0
+
+# Define Game State Management
+game_state = {
+    'player_x': player_x,
+    'player_y': player_y,
+    'player_health': player_health,
+    'player_score': player_score,
+    'weather': 'clear'
+}
+
+def save_game():
+    with open('savegame.json', 'w') as f:
+        json.dump(game_state, f)
+
+def load_game():
+    global game_state
+    try:
+        with open('savegame.json', 'r') as f:
+            game_state = json.load(f)
+    except FileNotFoundError:
+        pass
+
+def distance(x1, y1, x2, y2):
+    return math.hypot(x2 - x1, y2 - y1)
+
+def handle_client(client_socket):
+    while True:
+        try:
+            msg = client_socket.recv(1024).decode()
+            if msg:
+                client_socket.send(f"Echo: {msg}".encode())
+        except:
+            client_socket.close()
+            break
+
+def server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('0.0.0.0', 5555))
+    server_socket.listen(5)
+    while True:
+        client_socket, addr = server_socket.accept()
+        client_handler = threading.Thread(target=handle_client, args=(client_socket,))
+        client_handler.start()
+
+class Entity:
+    def __init__(self, x, y, size, color):
+        self.x = x
+        self.y = y
+        self.size = size
+        self.color = color
+
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color, (self.x - camera_x, self.y - camera_y, self.size, self.size))
+
+class Player(Entity):
+    def __init__(self, x, y, size, color):
+        super().__init__(x, y, size, color)
+        self.speed = player_speed
+        self.health = player_health
+        self.score = player_score
+
+    def move(self, keys):
+        if keys[K_LEFT]:
+            self.x -= self.speed
+        if keys[K_RIGHT]:
+            self.x += self.speed
+        if keys[K_UP]:
+            self.y -= self.speed
+        if keys[K_DOWN]:
+            self.y += self.speed
+
+    def update_game_state(self):
+        game_state['player_x'] = self.x
+        game_state['player_y'] = self.y
+        game_state['player_health'] = self.health
+        game_state['player_score'] = self.score
+
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color, (self.x - camera_x, self.y - camera_y, self.size, self.size))
+        pygame.draw.rect(screen, (255, 0, 0), (self.x - camera_x, self.y - camera_y - 10, self.size, 5))
+        pygame.draw.rect(screen, (0, 255, 0), (self.x - camera_x, self.y - camera_y - 10, self.size * (self.health / 100), 5))
+
+class Enemy(Entity):
+    def __init__(self, x, y, size, color, patrol_points):
+        super().__init__(x, y, size, color)
+        self.patrol_points = patrol_points
+        self.patrol_index = 0
+        self.patrol_direction = 1
+        self.speed = enemy_speed
+        self.ai_mode = 'patrol'
+
+    def update(self):
+        if self.ai_mode == 'patrol':
+            patrol_point = self.patrol_points[self.patrol_index]
+            dx, dy = patrol_point[0] - self.x, patrol_point[1] - self.y
+            distance_to_point = distance(self.x, self.y, patrol_point[0], patrol_point[1])
+
+            if distance_to_point < self.speed:
+                self.patrol_index = (self.patrol_index + self.patrol_direction) % len(self.patrol_points)
+                self.patrol_direction = -self.patrol_direction
+            else:
+                angle = math.atan2(dy, dx)
+                self.x += self.speed * math.cos(angle)
+                self.y += self.speed * math.sin(angle)
+
+        if self.ai_mode == 'chase' and distance(self.x, self.y, player.x, player.y) < 200:
+            angle = math.atan2(player.y - self.y, player.x - self.x)
+            self.x += self.speed * math.cos(angle)
+            self.y += self.speed * math.sin(angle)
+
+    def change_ai_mode(self, mode):
+        self.ai_mode = mode
+
+class PowerUp(Entity):
+    def __init__(self):
+        x = random.randint(0, SCREEN_WIDTH - POWER_UP_SIZE)
+        y = random.randint(-POWER_UP_SIZE, -10)
+        super().__init__(x, y, POWER_UP_SIZE, POWER_UP_COLOR)
+        self.type = random.choice(['score', 'health', 'speed'])
+
+    def update(self):
+        self.y += enemy_speed
+        if self.y > SCREEN_HEIGHT:
+            power_ups.remove(self)
+
+class Particle:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.size = PARTICLE_SIZE
+        self.life = random.randint(1, 5)
+        self.speed = random.uniform(0.5, 2)
+        self.angle = random.uniform(0, 2 * math.pi)
+
+    def update(self):
+        self.x += self.speed * math.cos(self.angle)
+        self.y += self.speed * math.sin(self.angle)
+        self.life -= 0.1
+        if self.life <= 0:
+            particles.remove(self)
+
+# Custom Shader Example (pseudo-shaders in Pygame)
+def apply_shader(surface, shader_type):
+    if shader_type == 'blur':
+        # Apply a simple blur effect (placeholder)
+        pass
+    elif shader_type == 'sepia':
+        # Apply a sepia effect (placeholder)
+        pass
+    return surface
+
+def draw_ui(player):
+    score_text = font.render(f"Score: {player.score}", True, TEXT_COLOR)
+    health_text = font.render(f"Health: {player.health}", True, TEXT_COLOR)
+    screen.blit(score_text, (10, 10))
+    screen.blit(health_text, (10, 50))
+
+def draw_weather():
+    if game_state['weather'] == 'rain':
+        # Draw rain effect
+        for _ in range(50):
+            pygame.draw.line(screen, WEATHER_COLOR, 
+                             (random.randint(0, SCREEN_WIDTH), random.randint(0, SCREEN_HEIGHT)),
+                             (random.randint(0, SCREEN_WIDTH), random.randint(0, SCREEN_HEIGHT) + 10), 1)
+    elif game_state['weather'] == 'snow':
+        # Draw snow effect
+        for _ in range(50):
+            pygame.draw.circle(screen, WEATHER_COLOR, 
+                               (random.randint(0, SCREEN_WIDTH), random.randint(0, SCREEN_HEIGHT)), 3)
+
+def game_loop():
+    global player_x, player_y, player_health, player_score, camera_x, camera_y
+
+    player = Player(player_x, player_y, PLAYER_SIZE, PLAYER_COLOR)
+    enemies_list = [Enemy(100, 100, ENEMY_SIZE, ENEMY_COLOR, patrol_points)]
+    power_ups_list = [PowerUp() for _ in range(3)]
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == K_s:
+                    save_game()
+                elif event.key == K_l:
+                    load_game()
+                elif event.key == K_p:
+                    pygame.mixer.music.pause()
+                elif event.key == K_r:
+                    pygame.mixer.music.unpause()
+
+        keys = pygame.key.get_pressed()
+        player.move(keys)
+        player.update_game_state()
+
+        # Update enemies and check for collisions
+        for enemy in enemies_list:
+            enemy.update()
+            if (player.x < enemy.x + ENEMY_SIZE and
+                player.x + PLAYER_SIZE > enemy.x and
+                player.y < enemy.y + ENEMY_SIZE and
+                player.y + PLAYER_SIZE > enemy.y):
+                enemies_list.remove(enemy)
+                player.health -= 20
+                hit_sound.play()
+
+        for power_up in power_ups_list:
+            power_up.update()
+            if (player.x < power_up.x + POWER_UP_SIZE and
+                player.x + PLAYER_SIZE > power_up.x and
+                player.y < power_up.y + POWER_UP_SIZE and
+                player.y + PLAYER_SIZE > power_up.y):
+                if power_up.type == 'score':
+                    player.score += 100
+                elif power_up.type == 'health':
+                    player.health = min(player.health + 20, 100)
+                elif power_up.type == 'speed':
+                    player.speed += 2
+                power_ups_list.remove(power_up)
+                power_up_sound.play()
+
+        # Update particles
+        for particle in particles:
+            particle.update()
+
+        # Draw everything
+        screen.fill(BACKGROUND_COLOR)
+        draw_weather()
+        for enemy in enemies_list:
+            enemy.draw(screen)
+        for power_up in power_ups_list:
+            power_up.draw(screen)
+        player.draw(screen)
+        draw_ui(player)
+
+        # Draw particles
+        for particle in particles:
+            pygame.draw.circle(screen, PARTICLE_COLOR, (int(particle.x - camera_x), int(particle.y - camera_y)), particle.size)
+
+        # Handle screen transitions and shaders (pseudo-code)
+        # screen = apply_shader(screen, 'sepia')
+
+        pygame.display.flip()
+        clock.tick(60)  # Frame rate control
+
+if __name__ == "__main__":
+    # Start server in a separate thread
+    server_thread = threading.Thread(target=server)
+    server_thread.start()
+
+    game_loop()
