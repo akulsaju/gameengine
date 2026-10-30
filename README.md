@@ -76,7 +76,7 @@ This project is licensed under the MIT License.
 
 ## Contact
 
-For any questions or feedback, please reach out to [akul_saju@hotmail.com](mailto:akul_saju@hotmail.com).
+For any questions or feedback, please reach out to [akulsaju@gmail.com](mailto:akulsaju@gmail.com).
 
 ---
 
